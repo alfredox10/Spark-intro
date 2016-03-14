@@ -158,7 +158,7 @@ biggestRecordAmazon = findBiggestRecord(amazonRecToToken)
 print 'The Amazon record with ID "%s" has the most tokens (%s)' % (biggestRecordAmazon[0][0],
                                                                    len(biggestRecordAmazon[0][1]))
 
-# !1
+
 # google = loadData(GOOGLE_PATH)
 # amazon = loadData(AMAZON_PATH)
 googleSmall = loadData(GOOGLE_SMALL_PATH)
