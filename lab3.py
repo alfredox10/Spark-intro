@@ -31,6 +31,8 @@ AMAZON_SMALL_PATH = 'Amazon_small.csv'
 GOLD_STANDARD_PATH = 'Amazon_Google_perfectMapping.csv'
 STOPWORDS_PATH = 'stopwords.txt'
 
+dummyrdd = sc.textFile('test', 4, 0)
+
 
 def removeQuotes(s):
     """
@@ -101,8 +103,14 @@ def loadData(path):
     assert raw.count() == (valid.count() + 1)
     return valid
 
+
 quickbrownfox = 'A quick brown fox jumps over the lazy dog.'
 split_regex = r'\W+'
+# google = loadData(GOOGLE_PATH)
+# amazon = loadData(AMAZON_PATH)
+googleSmall = loadData(GOOGLE_SMALL_PATH)
+amazonSmall = loadData(AMAZON_SMALL_PATH)
+
 
 def simpleTokenize(string):
     """ A simple implementation of input string tokenization
@@ -159,12 +167,109 @@ print 'The Amazon record with ID "%s" has the most tokens (%s)' % (biggestRecord
                                                                    len(biggestRecordAmazon[0][1]))
 
 
-# google = loadData(GOOGLE_PATH)
-# amazon = loadData(AMAZON_PATH)
-googleSmall = loadData(GOOGLE_SMALL_PATH)
-amazonSmall = loadData(AMAZON_SMALL_PATH)
+def tf(tokens):
+    """ Compute TF
+    Args:
+        tokens (list of str): input list of tokens from tokenize
+    Returns:
+        dictionary: a dictionary of tokens to its TF values
+    """
+    tf_dict = {}
+    total_count = len(tokens)
+    for word in tokens:
+        if word not in tf_dict.keys():
+            tf_dict[word] = 1
+        else:
+            tf_dict[word] += 1
+    tf_dict = {key: float(count)/total_count for key, count in tf_dict.items()}
+    return tf_dict
+    # res = (amazonSmall
+    #        .flatMap(lambda (tkid, token_list): list((token, 1) for token in token_list if token in tokens))
+    #        .reduceByKey(add).collectAsMap())
 
+googleSmall.sortBy(lambda (tid, tokens): -len(tokens)).take(1)
+print tf(tokenize(quickbrownfox)) # Should give { 'quick': 0.1666 ... }
+
+
+corpusRDD = amazonRecToToken + googleRecToToken
+print corpusRDD.take(1)
+
+def idfs(corpus):
+    """ Compute IDF
+    Args:
+        corpus (RDD): input corpus
+    Returns:
+        RDD: a RDD of (token, IDF value)
+    """
+    N = corpus.map(lambda (tkid, token_list): tkid).distinct().count()
+    uniqueTokens = corpus.flatMap(lambda (tkid, token_list): list(token for token in set(token_list)))
+    print uniqueTokens.take(3)
+    tokenCountPairTuple = uniqueTokens.map(lambda (token): (token, 1))
+    print tokenCountPairTuple.take(3)
+    tokenSumPairTuple = tokenCountPairTuple.reduceByKey(add)
+    print tokenSumPairTuple.take(3)
+    return (tokenSumPairTuple.map(lambda (token, count): (token, float(N)/count)))
+
+
+idfsSmall = idfs(amazonRecToToken.union(googleRecToToken))
+uniqueTokenCount = idfsSmall.count()
+print 'There are %s unique tokens in the small datasets.' % uniqueTokenCount
+
+
+def tfidf(tokens, idfs):
+    """ Compute TF-IDF
+    Args:
+        tokens (list of str): input list of tokens from tokenize
+        idfs (dictionary): record to IDF value
+    Returns:
+        dictionary: a dictionary of records to TF-IDF values
+    """
+    tfs = tf(tokens)
+    tfIdfDict = {k: v*idfs[k] for (k, v) in tfs.items()}
+    return tfIdfDict
+
+recb000hkgj8k = amazonRecToToken.filter(lambda x: x[0] == 'b000hkgj8k').collect()[0][1]
+idfsSmallWeights = idfsSmall.collectAsMap()
+rec_b000hkgj8k_weights = tfidf(recb000hkgj8k, idfsSmallWeights)
+
+print 'Amazon record "b000hkgj8k" has tokens and weights:\n%s' % rec_b000hkgj8k_weights
+
+
+import math
+
+def dotprod(a, b):
+    """ Compute dot product
+    Args:
+        a (dictionary): first dictionary of record to value
+        b (dictionary): second dictionary of record to value
+    Returns:
+        dotProd: result of the dot product with the two input dictionaries
+    """
+    return sum([v*b[k] for (k, v) in a.items() if k in b.keys()])
+
+def norm(a):
+    """ Compute square root of the dot product
+    Args:
+        a (dictionary): a dictionary of record to value
+    Returns:
+        norm: a dictionary of tokens to its TF values
+    """
+    return math.sqrt(dotprod(a,a))
+
+def cossim(a, b):
+    """ Compute cosine similarity
+    Args:
+        a (dictionary): first dictionary of record to value
+        b (dictionary): second dictionary of record to value
+    Returns:
+        cossim: dot product of two dictionaries divided by the norm of the first dictionary and
+                then by the norm of the second dictionary
+    """
+    dp = dotprod(a,b)
+    return (dp / norm(a)) / norm(b)
 
 print amazonSmall.take(2)
 print googleSmall.take(2)
-googleSmall.sortBy(lambda (tid, tokens): -len(tokens)).take(1)
+
+
+
