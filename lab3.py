@@ -106,8 +106,8 @@ def loadData(path):
 
 quickbrownfox = 'A quick brown fox jumps over the lazy dog.'
 split_regex = r'\W+'
-# google = loadData(GOOGLE_PATH)
-# amazon = loadData(AMAZON_PATH)
+google = loadData(GOOGLE_PATH)
+amazon = loadData(AMAZON_PATH)
 googleSmall = loadData(GOOGLE_SMALL_PATH)
 amazonSmall = loadData(AMAZON_SMALL_PATH)
 
@@ -210,7 +210,6 @@ def idfs(corpus):
     print tokenSumPairTuple.take(3)
     return (tokenSumPairTuple.map(lambda (token, count): (token, float(N)/count)))
 
-
 idfsSmall = idfs(amazonRecToToken.union(googleRecToToken))
 uniqueTokenCount = idfsSmall.count()
 print 'There are %s unique tokens in the small datasets.' % uniqueTokenCount
@@ -266,10 +265,391 @@ def cossim(a, b):
                 then by the norm of the second dictionary
     """
     dp = dotprod(a,b)
-    return (dp / norm(a)) / norm(b)
-
-print amazonSmall.take(2)
-print googleSmall.take(2)
-
+    na = norm(a)
+    nb = norm(b)
+    return (dp / na) / nb
 
 
+def cosineSimilarity(string1, string2, idfsDictionary):
+    """ Compute cosine similarity between two strings
+    Args:
+        string1 (str): first string
+        string2 (str): second string
+        idfsDictionary (dictionary): a dictionary of IDF values
+    Returns:
+        cossim: cosine similarity value
+    """
+    w1 = tfidf(tokenize(string1), idfsDictionary)
+    w2 = tfidf(tokenize(string2), idfsDictionary)
+    return cossim(w1, w2)
+
+cossimAdobe = cosineSimilarity('Adobe Photoshop',
+                               'Adobe Illustrator',
+                               idfsSmallWeights)
+
+print cossimAdobe
+
+
+crossSmall = (googleSmall
+              .cartesian(amazonSmall)
+              .cache())
+
+def computeSimilarity(record):
+    """ Compute similarity on a combination record
+    Args:
+        record: a pair, (google record, amazon record)
+    Returns:
+        pair: a pair, (google URL, amazon ID, cosine similarity value)
+    """
+    googleRec = record[0]
+    amazonRec = record[1]
+    googleURL = googleRec[0]
+    amazonID = amazonRec[0]
+    googleValue = googleRec[1]
+    amazonValue = amazonRec[1]
+    cs = cosineSimilarity(googleValue, amazonValue, idfsSmallWeights)
+    return (googleURL, amazonID, cs)
+
+similarities = (crossSmall
+                .map(lambda rec: computeSimilarity(rec))
+                .cache())
+
+def similar(amazonID, googleURL):
+    """ Return similarity value
+    Args:
+        amazonID: amazon ID
+        googleURL: google URL
+    Returns:
+        similar: cosine similarity value
+    """
+    return (similarities
+            .filter(lambda record: (record[0] == googleURL and record[1] == amazonID))
+            .collect()[0][2])
+
+similarityAmazonGoogle = similar('b000o24l3q', 'http://www.google.com/base/feeds/snippets/17242822440574356561')
+print 'Requested similarity is %s.' % similarityAmazonGoogle
+
+
+def computeSimilarityBroadcast(record):
+    """ Compute similarity on a combination record, using Broadcast variable
+    Args:
+        record: a pair, (google record, amazon record)
+    Returns:
+        pair: a pair, (google URL, amazon ID, cosine similarity value)
+    """
+    googleRec = record[0]
+    amazonRec = record[1]
+    googleURL = googleRec[0]
+    amazonID = amazonRec[0]
+    googleValue = googleRec[1]
+    amazonValue = amazonRec[1]
+    cs = cosineSimilarity(googleValue, amazonValue, idfsSmallBroadcast.value)
+    return (googleURL, amazonID, cs)
+
+idfsSmallBroadcast = sc.broadcast(idfsSmallWeights)
+similaritiesBroadcast = (crossSmall
+                         .map(lambda rec: computeSimilarityBroadcast(rec))
+                         .cache())
+
+def similarBroadcast(amazonID, googleURL):
+    """ Return similarity value, computed using Broadcast variable
+    Args:
+        amazonID: amazon ID
+        googleURL: google URL
+    Returns:
+        similar: cosine similarity value
+    """
+    return (similaritiesBroadcast
+            .filter(lambda record: (record[0] == googleURL and record[1] == amazonID))
+            .collect()[0][2])
+
+similarityAmazonGoogleBroadcast = similarBroadcast('b000o24l3q', 'http://www.google.com/base/feeds/snippets/17242822440574356561')
+print 'Requested similarity is %s.' % similarityAmazonGoogleBroadcast
+
+
+GOLDFILE_PATTERN = '^(.+),(.+)'
+
+# Parse each line of a data file useing the specified regular expression pattern
+def parse_goldfile_line(goldfile_line):
+    """ Parse a line from the 'golden standard' data file
+    Args:
+        goldfile_line: a line of data
+    Returns:
+        pair: ((key, 'gold', 1 if successful or else 0))
+    """
+    match = re.search(GOLDFILE_PATTERN, goldfile_line)
+    if match is None:
+        print 'Invalid goldfile line: %s' % goldfile_line
+        return (goldfile_line, -1)
+    elif match.group(1) == '"idAmazon"':
+        print 'Header datafile line: %s' % goldfile_line
+        return (goldfile_line, 0)
+    else:
+        key = '%s %s' % (removeQuotes(match.group(1)), removeQuotes(match.group(2)))
+        return ((key, 'gold'), 1)
+
+goldfile = os.path.join(baseDir, inputPath, GOLD_STANDARD_PATH)
+gsRaw = (sc
+         .textFile(goldfile)
+         .map(parse_goldfile_line)
+         .cache())
+
+gsFailed = (gsRaw
+            .filter(lambda s: s[1] == -1)
+            .map(lambda s: s[0]))
+for line in gsFailed.take(10):
+    print 'Invalid goldfile line: %s' % line
+
+goldStandard = (gsRaw
+                .filter(lambda s: s[1] == 1)
+                .map(lambda s: s[0])
+                .cache())
+
+print 'Read %d lines, successfully parsed %d lines, failed to parse %d lines' % (gsRaw.count(),
+                                                                                 goldStandard.count(),
+                                                                                 gsFailed.count())
+assert (gsFailed.count() == 0)
+assert (gsRaw.count() == (goldStandard.count() + 1))
+
+
+sims = (similaritiesBroadcast.map(lambda r: (' '.join([r[1], r[0]]), r[2]) ))
+
+trueDupsRDD = (sims.join(goldStandard))
+trueDupsCount = trueDupsRDD.count()
+avgSimDups = trueDupsRDD.map(lambda r: r[1][0]).mean()
+
+nonDupsRDD = (sims.subtractByKey(trueDupsRDD))
+avgSimNon = nonDupsRDD.map(lambda r: r[1]).mean()
+
+print 'There are %s true duplicates.' % trueDupsCount
+print 'The average similarity of true duplicates is %s.' % avgSimDups
+print 'And for non duplicates, it is %s.' % avgSimNon
+
+
+amazonFullRecToToken = amazon.map(lambda (k, v): (k, tokenize(v)))
+googleFullRecToToken = google.map(lambda (k, v): (k, tokenize(v)))
+print 'Amazon full dataset is %s products, Google full dataset is %s products' % (amazonFullRecToToken.count(),
+                                                                                    googleFullRecToToken.count())
+
+
+fullCorpusRDD = amazonFullRecToToken + googleFullRecToToken
+idfsFull = idfs(fullCorpusRDD)
+idfsFullCount = idfsFull.count()
+print 'There are %s unique tokens in the full datasets.' % idfsFullCount
+
+# Recompute IDFs for full dataset
+idfsFullWeights = idfsFull.collectAsMap()
+idfsFullBroadcast = sc.broadcast(idfsFullWeights)
+
+# Pre-compute TF-IDF weights.  Build mappings from record ID weight vector.
+amazonWeightsRDD = amazonFullRecToToken.map(lambda rec: (rec[0],tfidf(rec[1], idfsFullBroadcast.value)))
+googleWeightsRDD = googleFullRecToToken.map(lambda rec: (rec[0],tfidf(rec[1], idfsFullBroadcast.value)))
+print 'There are %s Amazon weights and %s Google weights.' % (amazonWeightsRDD.count(),
+                                                              googleWeightsRDD.count())
+
+
+amazonNorms = amazonWeightsRDD.map(lambda (url, weights): (url, norm(weights)))
+amazonNormsBroadcast = sc.broadcast(amazonNorms.collect())
+googleNorms = googleWeightsRDD.map(lambda (url, weights): (url, norm(weights)))
+googleNormsBroadcast = sc.broadcast(googleNorms.collect())
+
+
+def invert(record):
+    """ Invert (ID, tokens) to a list of (token, ID)
+    Args:
+        record: a pair, (ID, token vector)
+    Returns:
+        pairs: a list of pairs of token to ID
+    """
+    # [(token, record[0]) for token in set(record[1])]
+    # return googleWeightsRDD.flatMap(lambda (tid, token_list): list((token, tid) for token in set(token_list)))
+    return [(token, record[0]) for token in set(record[1])]
+
+amazonInvPairsRDD = (amazonWeightsRDD
+                    .flatMap(invert)
+                    .cache())
+
+googleInvPairsRDD = (googleWeightsRDD
+                    .flatMap(invert)
+                    .cache())
+
+print 'There are %s Amazon inverted pairs and %s Google inverted pairs.' % (amazonInvPairsRDD.count(),
+                                                                            googleInvPairsRDD.count())
+
+
+def swap(record):
+    """ Swap (token, (ID, URL)) to ((ID, URL), token)
+    Args:
+        record: a pair, (token, (ID, URL))
+    Returns:
+        pair: ((ID, URL), token)
+    """
+    token = record[0]
+    keys = record[1]
+    return (keys, token)
+
+commonTokens = (amazonInvPairsRDD
+                .join(googleInvPairsRDD)
+                .map(swap)
+                .groupByKey()
+                .map(lambda rec: (rec[0], list(rec[1])))
+                .cache())
+
+print 'Found %d common tokens' % commonTokens.count()
+print commonTokens.take(2)
+
+
+amazonWeightsBroadcast = sc.broadcast(amazonWeightsRDD.collectAsMap())
+googleWeightsBroadcast = sc.broadcast(googleWeightsRDD.collectAsMap())
+
+def fastCosineSimilarity(record):
+    """ Compute Cosine Similarity using Broadcast variables
+    Args:
+        record: ((ID, URL), token)
+    Returns:
+        pair: ((ID, URL), cosine similarity value)
+    """
+    amazonRec = record[0][0]
+    googleRec = record[0][1]
+    tokens = record[1]
+    s = sum([(amazonWeightsBroadcast.value[amazonRec][token]
+              * googleWeightsBroadcast.value[googleRec][token])
+             for token in tokens])
+    value = s / (dict(amazonNormsBroadcast.value)[amazonRec] * dict(googleNormsBroadcast.value)[googleRec])
+    key = (amazonRec, googleRec)
+    return (key, value)
+
+similaritiesFullRDD = (commonTokens
+                       .map(lambda record: fastCosineSimilarity(record))
+                       .cache())
+
+print similaritiesFullRDD.count()
+
+
+# Create an RDD of ((Amazon ID, Google URL), similarity score)
+simsFullRDD = similaritiesFullRDD.map(lambda x: ("%s %s" % (x[0][0], x[0][1]), x[1]))
+assert (simsFullRDD.count() == 2441100)
+
+# Create an RDD of just the similarity scores
+simsFullValuesRDD = (simsFullRDD
+                     .map(lambda x: x[1])
+                     .cache())
+assert (simsFullValuesRDD.count() == 2441100)
+
+# Look up all similarity scores for true duplicates
+
+# This helper function will return the similarity score for records that are in the
+# gold standard and the simsFullRDD (True positives), and will return 0 for records
+# that are in the gold standard but not in simsFullRDD (False Negatives).
+def gs_value(record):
+    if (record[1][1] is None):
+        return 0
+    else:
+        return record[1][1]
+
+# Join the gold standard and simsFullRDD, and then extract the similarities scores
+# using the helper function
+trueDupSimsRDD = (goldStandard
+                  .leftOuterJoin(simsFullRDD)
+                  .map(gs_value)
+                  .cache())
+print 'There are %s true duplicates.' % trueDupSimsRDD.count()
+assert(trueDupSimsRDD.count() == 1300)
+
+
+from pyspark.accumulators import AccumulatorParam
+class VectorAccumulatorParam(AccumulatorParam):
+    # Initialize the VectorAccumulator to 0
+    def zero(self, value):
+        return [0] * len(value)
+
+    # Add two VectorAccumulator variables
+    def addInPlace(self, val1, val2):
+        for i in xrange(len(val1)):
+            val1[i] += val2[i]
+        return val1
+
+# Return a list with entry x set to value and all other entries set to 0
+def set_bit(x, value, length):
+    bits = []
+    for y in xrange(length):
+        if (x == y):
+          bits.append(value)
+        else:
+          bits.append(0)
+    return bits
+
+# Pre-bin counts of false positives for different threshold ranges
+BINS = 101
+nthresholds = 100
+def bin(similarity):
+    return int(similarity * nthresholds)
+
+# fpCounts[i] = number of entries (possible false positives) where bin(similarity) == i
+zeros = [0] * BINS
+fpCounts = sc.accumulator(zeros, VectorAccumulatorParam())
+
+def add_element(score):
+    global fpCounts
+    b = bin(score)
+    fpCounts += set_bit(b, 1, BINS)
+
+simsFullValuesRDD.foreach(add_element)
+
+# Remove true positives from FP counts
+def sub_element(score):
+    global fpCounts
+    b = bin(score)
+    fpCounts += set_bit(b, -1, BINS)
+
+trueDupSimsRDD.foreach(sub_element)
+
+def falsepos(threshold):
+    fpList = fpCounts.value
+    return sum([fpList[b] for b in range(0, BINS) if float(b) / nthresholds >= threshold])
+
+def falseneg(threshold):
+    return trueDupSimsRDD.filter(lambda x: x < threshold).count()
+
+def truepos(threshold):
+    return trueDupSimsRDD.count() - falsenegDict[threshold]
+
+
+# Precision = true-positives / (true-positives + false-positives)
+# Recall = true-positives / (true-positives + false-negatives)
+# F-measure = 2 x Recall x Precision / (Recall + Precision)
+
+def precision(threshold):
+    tp = trueposDict[threshold]
+    return float(tp) / (tp + falseposDict[threshold])
+
+def recall(threshold):
+    tp = trueposDict[threshold]
+    return float(tp) / (tp + falsenegDict[threshold])
+
+def fmeasure(threshold):
+    r = recall(threshold)
+    p = precision(threshold)
+    return 2 * r * p / (r + p)
+
+
+thresholds = [float(n) / nthresholds for n in range(0, nthresholds)]
+falseposDict = dict([(t, falsepos(t)) for t in thresholds])
+falsenegDict = dict([(t, falseneg(t)) for t in thresholds])
+trueposDict = dict([(t, truepos(t)) for t in thresholds])
+
+precisions = [precision(t) for t in thresholds]
+recalls = [recall(t) for t in thresholds]
+fmeasures = [fmeasure(t) for t in thresholds]
+
+print precisions[0], fmeasures[0]
+assert (abs(precisions[0] - 0.000532546802671) < 0.0000001)
+assert (abs(fmeasures[0] - 0.00106452669505) < 0.0000001)
+
+
+fig = plt.figure()
+plt.plot(thresholds, precisions)
+plt.plot(thresholds, recalls)
+plt.plot(thresholds, fmeasures)
+plt.legend(['Precision', 'Recall', 'F-measure'])
+pass
