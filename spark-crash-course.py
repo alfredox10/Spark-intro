@@ -56,3 +56,48 @@ rows = baby_names.map(lambda line: line.split(','))
 
 rows.filter(lambda line: 'MICHAEL' in line).collect()
 
+sc.defaultParallelism # Get default parallelism value from system
+
+one_to_9 = range( 1, 10 )
+parallel = sc.parallelize( one_to_9, 3 )
+def f(iterator): yield sum(iterator)
+parallel.mapPartitions(f).collect()
+
+parallel = sc.parallelize(one_to_9)
+parallel.mapPartitions(f).collect()
+
+one = sc.parallelize(range(1,10))
+two = sc.parallelize(range(5,15))
+
+one.union(two).collect()
+
+one.intersection(two).collect()
+
+one.union(two).collect()
+
+one.union(two).distinct().collect()
+
+# Create (key, value) pair for Names to Ethnicity
+namesToEthnicity = rows.map(lambda n: (n[1], n[2])).groupByKey()
+
+# View values >> Create dictionary for iteratable
+namesToEthnicity.map(lambda x: {x[0]: list(x[1])}).take(3)
+
+numbered_rows = baby_names.filter(lambda line: 'Count' not in line).map(lambda line: line.split(','))
+numbered_rows.map(lambda n: (n[1], int(n[4]))).reduceByKey(add).sortByKey().take(5)
+numbered_rows.map(lambda n: (n[1], int(n[4]))).reduceByKey(add).sortByKey(False).take(5)
+
+names1 = sc.parallelize(['abe', 'abby', 'apple'])
+print names1.reduce(add)
+
+names2 = sc.parallelize(['apple', 'beatty', 'beatrice']).map(lambda a: (a, len(a)))
+names2.collect()
+names2.flatMap(lambda t: [t[1]]).reduce(add)
+
+names1.count()
+
+teams = sc.parallelize(['twins', 'brewers','cubs','white sox','indians','bad news bears'])
+teams.takeSample(True, 3)
+
+hockeyteams = sc.parallelize(['wild', 'blackhawks', 'red wings', 'wild', 'oilers', 'wild', 'whalers'])
+hockeyteams.map(lambda k: (k, 1)).countByKey().items()
