@@ -18,7 +18,7 @@ from pyspark import SparkContext
 sc = SparkContext("local", "Lab3")
 #--------- Spark setup -----------
 
-
+# ------ DAY 1 -------
 ut = sc.textFile('data/uber/Uber-Jan-Feb-FOIL.csv')
 rows = ut.map(lambda  line: line.split(','))
 
@@ -41,3 +41,18 @@ filteredRows = (sc.textFile('data/uber/Uber-Jan-Feb-FOIL.csv')
 filteredRows.map(lambda kp: (kp[0], int(kp[3]))).reduceByKey(add).collect()
 
 filteredRows.map(lambda kp: (kp[0], int(kp[3]))).reduceByKey(add).takeOrdered(10, key=lambda x: -x[1])
+
+
+# ------ DAY 2 -------
+baby_names = sc.textFile('data/baby_names.csv')
+rows = baby_names.map(lambda line: line.split(','))
+
+# Format file to emulate one in video
+# new_file_rows = (rows.map(lambda (year, sex, ethnicity, name, count, rank): ','.join([year, name, ethnicity, sex, count + '\n']))
+#  .collect())
+# fh = open('data/baby_names.csv', 'w')
+# fh.writelines(new_file_rows)
+# fh.close()
+
+rows.filter(lambda line: 'MICHAEL' in line).collect()
+
