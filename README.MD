@@ -9,5 +9,5 @@ Day 2: https://www.youtube.com/watch?v=HMxgv88dnkg&feature=youtu.be
 Day 3: https://www.youtube.com/watch?v=iFRcKMeUCFQ&feature=youtu.be
 
 #### Spark Udemy Course
-##### Continuation on the crash course, and also introduces SparkSQL and local/AWS Cluster deployment
+##### Continuation on the crash course, and also introduces SparkSQL and Local + AWS Cluster deployment
 https://www.udemy.com/spark-python/learn/v4/overview
