@@ -1,0 +1,7 @@
+Spark Install instructions
+https://www.linkedin.com/pulse/getting-started-apache-spark-ubuntu-1404-myles-harrison
+
+Troubleshooting:
+1. Install Maven separately
+2. Download the source package, not prebuilt
+3. Build the source with Maven not SBT

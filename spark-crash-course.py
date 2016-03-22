@@ -19,7 +19,7 @@ sc = SparkContext("local", "Lab3")
 #--------- Spark setup -----------
 
 # ------ DAY 1 -------
-ut = sc.textFile('data/uber/Uber-Jan-Feb-FOIL.csv')
+ut = sc.textFile('data/udemy/Uber-Jan-Feb-FOIL.csv')
 rows = ut.map(lambda  line: line.split(','))
 
 rows.map(lambda row: row[0]).distinct().count()
@@ -34,7 +34,7 @@ base02617.filter(lambda row: int(row[3]) > 15000).count()
 
 base02617.filter(lambda row: int(row[3]) > 15000).map(lambda day: day[1]).distinct().count()
 
-filteredRows = (sc.textFile('data/uber/Uber-Jan-Feb-FOIL.csv')
+filteredRows = (sc.textFile('data/udemy/Uber-Jan-Feb-FOIL.csv')
                 .filter(lambda line: 'base' not in line)
                 .map(lambda line: line.split(',')) )
 
@@ -44,7 +44,7 @@ filteredRows.map(lambda kp: (kp[0], int(kp[3]))).reduceByKey(add).takeOrdered(10
 
 
 # ------ DAY 2 -------
-baby_names = sc.textFile('data/baby_names.csv')
+baby_names = sc.textFile('data/udemy/baby_names.csv')
 rows = baby_names.map(lambda line: line.split(','))
 
 # Format file to emulate one in video
@@ -79,6 +79,8 @@ one.union(two).distinct().collect()
 
 # Create (key, value) pair for Names to Ethnicity
 namesToEthnicity = rows.map(lambda n: (n[1], n[2])).groupByKey()
+
+
 
 # View values >> Create dictionary for iteratable
 namesToEthnicity.map(lambda x: {x[0]: list(x[1])}).take(3)
